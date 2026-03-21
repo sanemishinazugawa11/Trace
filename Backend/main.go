@@ -109,7 +109,7 @@ func callGroq(messages []GroqMessage) (string, error) {
 		return "", fmt.Errorf("GROQ_API_KEY environment variable not set")
 	}
 
-	groqReq := GroqRequest{Model: "llama3-70b-8192", Messages: messages}
+	groqReq := GroqRequest{Model: "llama-3.3-70b-versatile", Messages: messages}
 	reqBytes, _ := json.Marshal(groqReq)
 
 	req, err := http.NewRequest("POST", "https://api.groq.com/openai/v1/chat/completions", bytes.NewBuffer(reqBytes))
