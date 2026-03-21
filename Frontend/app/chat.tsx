@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import Markdown from 'react-native-markdown-display';
 import { useLocalSearchParams, useRouter, useRootNavigationState } from 'expo-router'; 
-import { useSafeAreaInsets } from 'react-native-safe-area-context'; // <-- ADDED FOR NOTCH AVOIDANCE
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ChatScreen() {
   const { isDark } = useTheme();
@@ -15,7 +15,7 @@ export default function ChatScreen() {
   const rootNavigationState = useRootNavigationState();
   const scrollViewRef = useRef<ScrollView>(null);
   const params = useLocalSearchParams();
-  const insets = useSafeAreaInsets(); // <-- Measures the phone's hardware notch dynamically
+  const insets = useSafeAreaInsets();
 
   // ROUTE GUARD
   useEffect(() => {
@@ -35,6 +35,7 @@ export default function ChatScreen() {
 
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isWakingUp, setIsWakingUp] = useState(false);
   const [sessionId] = useState((params.sessionId as string) || Date.now().toString());
 
   const [messages, setMessages] = useState(() => {
@@ -56,16 +57,27 @@ export default function ChatScreen() {
     const tempId = Date.now().toString();
     const userMsg = { id: tempId, role: 'user', text: inputText.trim() };
 
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev: any) => [...prev, userMsg]);
     setInputText('');
     setIsLoading(true);
+    setIsWakingUp(false);
+
+    // Show "waking up" message after 5 seconds if still loading
+    const wakeUpTimer = setTimeout(() => {
+      setIsWakingUp(true);
+    }, 5000);
 
     try {
-      const SERVER_URL = 'https://rwxtq-152-57-137-235.a.free.pinggy.link/api/debug';
+      const SERVER_URL = 'https://trace-aagz.onrender.com/api/debug';
+
+      // 60 second timeout to handle Render cold starts
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
 
       const response = await fetch(SERVER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({ 
           sessionId: sessionId, 
           username: user, 
@@ -73,16 +85,28 @@ export default function ChatScreen() {
         }),
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) throw new Error(`Server responded with status: ${response.status}`);
 
       const data = await response.json();
       const aiMsg = { id: (Date.now() + 1).toString(), role: 'ai', text: data.reply };
-      setMessages((prev) => [...prev, aiMsg]);
-    } catch (error) {
-      const errorMsg = { id: (Date.now() + 1).toString(), role: 'ai', text: '`Error:` Could not connect to backend.' };
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages((prev: any) => [...prev, aiMsg]);
+
+    } catch (error: any) {
+      const isTimeout = error?.name === 'AbortError';
+      const errorMsg = { 
+        id: (Date.now() + 1).toString(), 
+        role: 'ai', 
+        text: isTimeout 
+          ? 'The server is waking up from sleep — please try sending your message again in a few seconds.' 
+          : 'Could not connect to backend. Please check your connection and try again.',
+      };
+      setMessages((prev: any) => [...prev, errorMsg]);
     } finally {
+      clearTimeout(wakeUpTimer);
       setIsLoading(false);
+      setIsWakingUp(false);
     }
   };
 
@@ -96,27 +120,34 @@ export default function ChatScreen() {
 
   return (
     <KeyboardAvoidingView 
-      // 1. Dynamic padding ensures the notch is always cleared
       style={[styles.container, { backgroundColor: surfaceColor, paddingTop: insets.top + 60 }]} 
-      // 2. Fixes Android keyboard hiding the input field
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
       <Text style={[styles.title, { color: textColor }]}>Assistant</Text>
 
-      <ScrollView style={styles.chatArea} showsVerticalScrollIndicator={false} ref={scrollViewRef} onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}>
-        {messages.map((msg, index) => {
+      <ScrollView 
+        style={styles.chatArea} 
+        showsVerticalScrollIndicator={false} 
+        ref={scrollViewRef} 
+        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+      >
+        {messages.map((msg: any, index: number) => {
           const isUser = msg.role === 'user';
           const key = msg.id || index.toString();
 
           return (
             <View key={key} style={[styles.messageWrapper, isUser ? styles.messageWrapperUser : styles.messageWrapperAi]}>
               <View style={[styles.bubble, isUser ? styles.userBubble : styles.aiBubble, {
-                    backgroundColor: isUser ? userBubbleBg : aiBubbleBg,
-                    borderColor: isUser ? 'transparent' : borderColor,
-                    borderWidth: isUser ? 0 : StyleSheet.hairlineWidth,
-                    shadowColor: isUser ? 'transparent' : '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: isUser ? 0 : isDark ? 0 : 0.05, shadowRadius: 4, elevation: isUser ? 0 : 1,
-                  }]}>
+                backgroundColor: isUser ? userBubbleBg : aiBubbleBg,
+                borderColor: isUser ? 'transparent' : borderColor,
+                borderWidth: isUser ? 0 : StyleSheet.hairlineWidth,
+                shadowColor: isUser ? 'transparent' : '#000', 
+                shadowOffset: { width: 0, height: 1 }, 
+                shadowOpacity: isUser ? 0 : isDark ? 0 : 0.05, 
+                shadowRadius: 4, 
+                elevation: isUser ? 0 : 1,
+              }]}>
                 {isUser ? (
                   <Text selectable style={styles.userText}>{msg.text}</Text>
                 ) : (
@@ -134,10 +165,13 @@ export default function ChatScreen() {
           );
         })}
 
+        {/* Loading / Waking up indicator */}
         {isLoading && (
           <View style={[styles.typingBubble, { backgroundColor: aiBubbleBg, borderColor: borderColor }]}>
             <ActivityIndicator size="small" color={accentColor} />
-            <Text style={[styles.typingText, { color: subText }]}>Analyzing…</Text>
+            <Text style={[styles.typingText, { color: subText }]}>
+              {isWakingUp ? 'Waking up server…' : 'Analyzing…'}
+            </Text>
           </View>
         )}
       </ScrollView>
@@ -149,9 +183,15 @@ export default function ChatScreen() {
           placeholderTextColor={subText}
           value={inputText}
           onChangeText={setInputText}
-          multiline maxLength={3000}
+          multiline 
+          maxLength={3000}
         />
-        <TouchableOpacity style={[styles.sendBtn, { backgroundColor: inputText.trim() ? accentColor : isDark ? '#2C2C2E' : '#E5E5EA' }]} onPress={sendMessage} disabled={!inputText.trim() || isLoading} activeOpacity={0.8}>
+        <TouchableOpacity 
+          style={[styles.sendBtn, { backgroundColor: inputText.trim() ? accentColor : isDark ? '#2C2C2E' : '#E5E5EA' }]} 
+          onPress={sendMessage} 
+          disabled={!inputText.trim() || isLoading} 
+          activeOpacity={0.8}
+        >
           <Ionicons name="arrow-up" size={18} color={inputText.trim() ? '#FFFFFF' : isDark ? '#48484A' : '#C7C7CC'} />
         </TouchableOpacity>
       </View>
@@ -174,8 +214,6 @@ const styles = StyleSheet.create({
   copyText: { fontSize: 11, marginLeft: 3, fontWeight: '500' },
   typingBubble: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', marginBottom: 16, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, borderBottomLeftRadius: 5, borderWidth: StyleSheet.hairlineWidth, gap: 8 },
   typingText: { fontSize: 14, fontWeight: '400' },
-  
-  // --- ONLY THESE THREE BLOCKS WERE CHANGED ---
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', marginHorizontal: 16, marginBottom: 116, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 26, borderWidth: StyleSheet.hairlineWidth, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
   input: { flex: 1, maxHeight: 150, minHeight: 46, fontSize: 16, paddingTop: 10, paddingBottom: 10, paddingRight: 12, lineHeight: 22 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 3 },

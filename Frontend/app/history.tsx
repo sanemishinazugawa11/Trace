@@ -40,7 +40,7 @@ export default function HistoryScreen() {
   // Custom Modal State
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
 
-  const SERVER_BASE_URL = 'https://rwxtq-152-57-137-235.a.free.pinggy.link';
+  const SERVER_BASE_URL = 'https://trace-aagz.onrender.com';
 
   const fetchHistory = async () => {
     try {

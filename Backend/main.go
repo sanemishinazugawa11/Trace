@@ -13,8 +13,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// --- DATA STRUCTURES ---
-
 type User struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -54,7 +52,6 @@ type AppResponse struct {
 	Reply string `json:"reply"`
 }
 
-// Groq API Structures
 type GroqMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -71,8 +68,6 @@ type GroqResponse struct {
 	} `json:"choices"`
 }
 
-// --- DATABASE ---
-
 var db *sql.DB
 
 func initDB() {
@@ -87,34 +82,26 @@ func initDB() {
 		panic("Failed to connect to database: " + err.Error())
 	}
 
+	db.SetMaxOpenConns(5)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(30 * time.Minute)
+
 	if err = db.Ping(); err != nil {
 		panic("Database is unreachable: " + err.Error())
 	}
 
-	// Create tables if they don't exist
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			username TEXT PRIMARY KEY,
-			password TEXT NOT NULL
-		);
-
-		CREATE TABLE IF NOT EXISTS sessions (
-			id TEXT PRIMARY KEY,
-			username TEXT NOT NULL,
-			title TEXT,
-			timestamp TEXT,
-			status TEXT,
-			messages JSONB DEFAULT '[]'
-		);
-	`)
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT NOT NULL);`)
 	if err != nil {
-		panic("Failed to create tables: " + err.Error())
+		panic("Failed to create users table: " + err.Error())
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, username TEXT NOT NULL, title TEXT, timestamp TEXT, status TEXT, messages JSONB DEFAULT '[]');`)
+	if err != nil {
+		panic("Failed to create sessions table: " + err.Error())
 	}
 
 	fmt.Println("✅ Database connected and tables ready.")
 }
-
-// --- GROQ AI CALL ---
 
 func callGroq(messages []GroqMessage) (string, error) {
 	apiKey := os.Getenv("GROQ_API_KEY")
@@ -122,11 +109,7 @@ func callGroq(messages []GroqMessage) (string, error) {
 		return "", fmt.Errorf("GROQ_API_KEY environment variable not set")
 	}
 
-	groqReq := GroqRequest{
-		Model:    "llama3-70b-8192",
-		Messages: messages,
-	}
-
+	groqReq := GroqRequest{Model: "llama3-70b-8192", Messages: messages}
 	reqBytes, _ := json.Marshal(groqReq)
 
 	req, err := http.NewRequest("POST", "https://api.groq.com/openai/v1/chat/completions", bytes.NewBuffer(reqBytes))
@@ -158,15 +141,12 @@ func callGroq(messages []GroqMessage) (string, error) {
 	return groqResp.Choices[0].Message.Content, nil
 }
 
-// --- CORS HELPER ---
-
 func setCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Content-Type", "application/json")
 }
-
-// --- AUTH ENDPOINTS ---
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
 	setCORS(w)
@@ -177,6 +157,11 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	if req.Username == "" || req.Password == "" {
+		http.Error(w, "Username and password are required", http.StatusBadRequest)
 		return
 	}
 
@@ -202,6 +187,11 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Username == "" || req.Password == "" {
+		http.Error(w, "Username and password are required", http.StatusBadRequest)
+		return
+	}
+
 	var storedPassword string
 	err := db.QueryRow("SELECT password FROM users WHERE username = $1", req.Username).Scan(&storedPassword)
 	if err != nil || storedPassword != req.Password {
@@ -211,8 +201,6 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(map[string]string{"message": "Login successful"})
 }
-
-// --- CHAT ENDPOINTS ---
 
 func debugHandler(w http.ResponseWriter, r *http.Request) {
 	setCORS(w)
@@ -226,7 +214,11 @@ func debugHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load existing session messages from DB
+	if appReq.Prompt == "" || appReq.Username == "" {
+		http.Error(w, "Username and prompt are required", http.StatusBadRequest)
+		return
+	}
+
 	var messagesJSON []byte
 	var groqMessages []GroqMessage
 
@@ -256,14 +248,12 @@ func debugHandler(w http.ResponseWriter, r *http.Request) {
 
 	groqMessages = append(groqMessages, GroqMessage{Role: "user", Content: appReq.Prompt})
 
-	// Call Groq
 	aiReply, err := callGroq(groqMessages)
 	if err != nil {
 		http.Error(w, "Failed to get AI response: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Update or insert session
 	if sessionExists {
 		var existingMessages []Message
 		json.Unmarshal(messagesJSON, &existingMessages)
@@ -272,10 +262,7 @@ func debugHandler(w http.ResponseWriter, r *http.Request) {
 			Message{Role: "ai", Text: aiReply},
 		)
 		updatedJSON, _ := json.Marshal(existingMessages)
-		db.Exec(
-			"UPDATE sessions SET messages = $1 WHERE id = $2 AND username = $3",
-			updatedJSON, appReq.SessionID, appReq.Username,
-		)
+		db.Exec("UPDATE sessions SET messages = $1 WHERE id = $2 AND username = $3", updatedJSON, appReq.SessionID, appReq.Username)
 	} else {
 		newMessages := []Message{
 			{Role: "user", Text: appReq.Prompt},
@@ -284,24 +271,23 @@ func debugHandler(w http.ResponseWriter, r *http.Request) {
 		newMessagesJSON, _ := json.Marshal(newMessages)
 		db.Exec(
 			"INSERT INTO sessions (id, username, title, timestamp, status, messages) VALUES ($1, $2, $3, $4, $5, $6)",
-			appReq.SessionID,
-			appReq.Username,
-			appReq.Prompt,
-			time.Now().Format("Jan 02, 3:04 PM"),
-			"error",
-			newMessagesJSON,
+			appReq.SessionID, appReq.Username, appReq.Prompt,
+			time.Now().Format("2006-01-02 15:04:05"),
+			"error", newMessagesJSON,
 		)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(AppResponse{Reply: aiReply})
 }
 
 func getHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	setCORS(w)
-	w.Header().Set("Content-Type", "application/json")
 
 	username := r.URL.Query().Get("username")
+	if username == "" {
+		json.NewEncoder(w).Encode(map[string]interface{}{"sessions": []Session{}})
+		return
+	}
 
 	rows, err := db.Query(
 		"SELECT id, username, title, timestamp, status, messages FROM sessions WHERE username = $1 ORDER BY timestamp DESC",
@@ -345,7 +331,6 @@ func deleteHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Deleted successfully"})
 }
 
-// Health check for Render
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))

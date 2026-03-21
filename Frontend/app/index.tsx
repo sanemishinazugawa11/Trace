@@ -37,7 +37,7 @@ export default function TraceMainScreen() {
     
     try {
       // ⚠️ IMPORTANT: Change 10.0.2.2 to your computer's IP if testing on a physical phone
-      const SERVER_URL = `https://rwxtq-152-57-137-235.a.free.pinggy.link${endpoint}`;
+      const SERVER_URL = `https://trace-aagz.onrender.com${endpoint}`;
       
       const response = await fetch(SERVER_URL, {
         method: 'POST',
