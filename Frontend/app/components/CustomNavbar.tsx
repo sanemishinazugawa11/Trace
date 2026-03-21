@@ -3,12 +3,17 @@ import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from './ThemeContext';
+import { useAuth } from './AuthContext'; // <-- 1. Import Auth
 import { BlurView } from 'expo-blur';
 
 export default function CustomNavBar() {
   const router = useRouter();
   const pathname = usePathname();
   const { isDark } = useTheme();
+  const { user } = useAuth(); // <-- 2. Get user state
+
+  // 3. SECURE THE NAVBAR: If no user is logged in, hide the navbar entirely!
+  if (!user) return null;
 
   const iconDefault = isDark ? 'rgba(235,235,245,0.3)' : 'rgba(60,60,67,0.3)';
   const iconActive = isDark ? '#0A84FF' : '#007AFF';

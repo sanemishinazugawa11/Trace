@@ -1,35 +1,35 @@
 import React from 'react';
 import { Stack } from 'expo-router';
-import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import CustomNavBar from './components/CustomNavbar';
 import { ThemeProvider, useTheme } from './components/ThemeContext';
+import { AuthProvider } from './components/AuthContext'; 
+// 1. Import Safe Area Tools
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function AppLayout() {
   const { isDark, toggleTheme } = useTheme();
   const bgColor = isDark ? '#000000' : '#F2F2F7';
+  
+  // 2. Grab the dynamic notch/status bar measurements for the device
+  const insets = useSafeAreaInsets();
 
   return (
     <View style={[styles.appContainer, { backgroundColor: bgColor }]}>
-
-      {/* Refined Apple-style theme toggle */}
       <TouchableOpacity
         style={[
           styles.themeToggle,
-          {
-            backgroundColor: isDark
-              ? 'rgba(44,44,46,0.92)'
-              : 'rgba(255,255,255,0.92)',
+          { 
+            backgroundColor: isDark ? 'rgba(44,44,46,0.92)' : 'rgba(255,255,255,0.92)',
+            // 3. Push the button down dynamically based on the specific phone's notch!
+            top: insets.top + 10 
           },
         ]}
         onPress={toggleTheme}
         activeOpacity={0.7}
       >
-        <Ionicons
-          name={isDark ? 'sunny' : 'moon'}
-          size={18}
-          color={isDark ? '#FFD60A' : '#3C3C43'}
-        />
+        <Ionicons name={isDark ? 'sunny' : 'moon'} size={18} color={isDark ? '#FFD60A' : '#3C3C43'} />
       </TouchableOpacity>
 
       <View style={styles.content}>
@@ -54,9 +54,14 @@ function AppLayout() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <AppLayout />
-    </ThemeProvider>
+    // 4. Wrap the whole app in the Provider so it can calculate screen dimensions
+    <SafeAreaProvider>
+      <AuthProvider>
+        <ThemeProvider>
+          <AppLayout />
+        </ThemeProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -65,7 +70,6 @@ const styles = StyleSheet.create({
   content: { flex: 1 },
   themeToggle: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 56 : 20,
     right: 20,
     zIndex: 100,
     width: 38,
